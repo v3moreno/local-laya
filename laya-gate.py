@@ -138,8 +138,8 @@ def pretool(ev):
     name, inp = tool_name(ev), ev.get("tool_input") or {}
     st = load_state(ev)
 
-    # a doc-scoring laya call about to run authorizes reads for this session
-    if "laya_filter" in name or "laya_triage" in name:
+    # a doc-scoring decision call (laya or jev) authorizes reads this session
+    if re.search(r"(laya|jev)_(filter|triage)", name):
         st["docs_scored"] = True
         save_state(ev, st)
         out({})
@@ -155,8 +155,8 @@ def pretool(ev):
     if name == "Bash":
         cmd = inp.get("command", "")
 
-        # ask CLI doc-scoring via shell counts the same as the MCP tools
-        if re.search(r"\bask\s+(relevant|triage|filter)\b", cmd):
+        # ask/ask-jev CLI doc-scoring via shell counts the same as MCP tools
+        if re.search(r"\bask(-jev)?\s+(relevant|triage|filter)\b", cmd):
             st["docs_scored"] = True
             save_state(ev, st)
 
