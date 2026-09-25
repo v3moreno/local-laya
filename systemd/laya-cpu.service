@@ -4,11 +4,11 @@ After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/Projects/local-laya
 EnvironmentFile=-%h/Projects/local-laya/laya.env
 Environment=LAYA_HOST=127.0.0.1 LAYA_PORT=8123
 Environment=LAYA_DEVICE=cpu LAYA_PRELOAD=1 LAYA_THREADS=8
-ExecStart=%h/Projects/local-laya/.venv/bin/python -m laya.serve
+WorkingDirectory=%h/Projects/local-laya
+ExecStart=%h/Projects/local-laya/.venv/bin/python -m serve
 Restart=on-failure
 RestartSec=3
 
