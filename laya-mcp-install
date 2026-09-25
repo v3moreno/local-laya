@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# laya-mcp-install — register the laya MCP proxy with every agent that supports MCP,
+# and install the native pi extension where MCP doesn't exist. Idempotent.
+#
+#   ./laya-mcp-install           # install for every agent found
+#   ./laya-mcp-install codex pi  # only these
+#
+# Config written:
+#   claude   claude mcp add --scope user
+#   codex    ~/.codex/config.toml            [mcp_servers.laya]
+#   opencode ~/.config/opencode/opencode.json  mcp.laya
+#   crush    $STATE/agents/crush/crush.json    mcp.laya (plugin rewrites it on open — see below)
+#   grok     GROK_HOME=$STATE/agents/grok  grok mcp add
+#   copilot  ~/.copilot/mcp-config.json      mcpServers.laya
+#   hermes   hermes mcp add laya --command
+#   pi/omp   extensions/laya.js copied into the agent dir (native tools, no MCP)
+set -euo pipefail
+cd "$(dirname "$0")"; HERE=$PWD
+
+PY=$HERE/.venv/bin/python
+SRV=$HERE/laya-mcp.py
+PI_EXT=$HERE/../ask-laya/pi-extension/laya.js
+STATE=${OMARCHY_LOCAL_AI_STATE:-$HOME/.local/state/omarchy/local-ai}
+
+ok() { printf '  ok %s\n' "$1"; }
+skip() { printf '  -  %s\n' "$1"; }
+
+install_codex() {
+  local f=$HOME/.codex/config.toml
+  [[ -f $f ]] || { skip "codex: no $f"; return; }
+  if grep -q '^\[mcp_servers\.laya\]' "$f"; then skip "codex: already configured"; return; fi
+  cat >>"$f" <<EOF
+
+[mcp_servers.laya]
+command = "$PY"
+args = ["$SRV"]
+startup_timeout_sec = 15
+tool_timeout_sec = 60
+EOF
+  ok "codex: $f"
+}
+
+install_claude() {
+  command -v claude >/dev/null || { skip "claude: not installed"; return; }
+  claude mcp list 2>/dev/null | grep -q '^laya' && { skip "claude: already configured"; return; }
+  claude mcp add --scope user laya -- "$PY" "$SRV" >/dev/null && ok "claude: user scope"
+}
+
+install_opencode() {
+  local d=$HOME/.config/opencode
+  local f=$d/opencode.json
+  mkdir -p "$d"
+  [[ -f $f ]] || echo '{}' >"$f"
+  if jq -e '.mcp.laya' "$f" >/dev/null 2>&1; then skip "opencode: already configured"; return; fi
+  jq --arg c "$PY" --arg a "$SRV" '.mcp.laya={type:"local",command:[$c,$a],enabled:true}' \
+    "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  ok "opencode: $f"
+}
+
+install_crush() {
+  local d=$STATE/agents/crush
+  local f=$d/crush/crush.json
+  mkdir -p "$d/crush"
+  [[ -f $f ]] || echo '{}' >"$f"
+  if jq -e '.mcp.laya' "$f" >/dev/null 2>&1; then skip "crush: already configured"; return; fi
+  jq --arg c "$PY" --arg a "$SRV" '.mcp.laya={type:"stdio",command:$c,args:[$a]}' \
+    "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  ok "crush: $f (re-run this after each 'open' if the plugin regenerates crush.json)"
+}
+
+install_grok() {
+  command -v grok >/dev/null || { skip "grok: not installed"; return; }
+  GROK_HOME=$STATE/agents/grok grok mcp add laya "$PY" -- "$SRV" >/dev/null 2>&1 \
+    && ok "grok: $STATE/agents/grok"
+}
+
+install_copilot() {
+  local d=$HOME/.copilot
+  local f=$d/mcp-config.json
+  mkdir -p "$d"
+  [[ -f $f ]] || echo '{"mcpServers":{}}' >"$f"
+  if jq -e '.mcpServers.laya' "$f" >/dev/null 2>&1; then skip "copilot: already configured"; return; fi
+  jq --arg c "$PY" --arg a "$SRV" '.mcpServers.laya={type:"stdio",command:$c,args:[$a]}' \
+    "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  ok "copilot: $f"
+}
+
+install_hermes() {
+  command -v hermes >/dev/null || { skip "hermes: not installed"; return; }
+  hermes mcp list 2>/dev/null | grep -qi laya && { skip "hermes: already configured"; return; }
+  yes | hermes mcp add laya --command "$PY" --args "$SRV" >/dev/null 2>&1 && ok "hermes"
+}
+
+install_omp() { install_pi "$1"; }
+install_pi() {
+  local a=$1 d=$STATE/agents/$a/extensions
+  mkdir -p "$d"
+  if [[ ! -f $PI_EXT ]]; then skip "$a: $PI_EXT missing"; return; fi
+  cp -f "$PI_EXT" "$d/laya.js" && ok "$a: $d/laya.js (native extension — $a has no MCP)"
+}
+
+agents=("$@")
+wanted() { ((${#agents[@]} == 0)) || printf '%s\n' "${agents[@]}" | grep -qx "$1"; }
+for a in claude codex opencode crush grok copilot hermes pi omp; do
+  wanted "$a" || continue
+  "install_$a" "$a" || echo "  !! $a failed"
+done
