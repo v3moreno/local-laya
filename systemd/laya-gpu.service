@@ -1,0 +1,16 @@
+[Unit]
+Description=Laya decision daemon (GPU)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Projects/local-laya
+EnvironmentFile=-%h/Projects/local-laya/laya.env
+Environment=LAYA_HOST=127.0.0.1 LAYA_PORT=8124
+Environment=LAYA_DEVICE=cuda LAYA_PRELOAD=0
+ExecStart=%h/Projects/local-laya/.venv/bin/python -m laya.serve
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
