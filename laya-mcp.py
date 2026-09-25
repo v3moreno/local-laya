@@ -162,7 +162,8 @@ def laya_triage(files: list) -> str:
     res = _post("/v1/systemone/batch",
                 {"requests": [{"state": it["state"], "questions": TRIAGE_Q} for it in good]}) if good else {"results": []}
     scores = {it["file"]: _slim(r) for it, r in zip(good, res["results"])}
-    return json.dumps([dict(it, **scores.get(it["file"], {})) if "state" in it else it for it in items])
+    return json.dumps([{"file": it["file"], **scores[it["file"]]} if "state" in it else it
+                       for it in items])
 
 
 @server.tool(name="laya_yesno", description=(
