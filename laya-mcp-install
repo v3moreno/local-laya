@@ -1,19 +1,6 @@
 #!/usr/bin/env bash
-# laya-mcp-install — register the laya MCP proxy with every agent that supports MCP,
-# and install the native pi extension where MCP doesn't exist. Idempotent.
-#
-#   ./laya-mcp-install           # install for every agent found
-#   ./laya-mcp-install codex pi  # only these
-#
-# Config written:
-#   claude   claude mcp add --scope user
-#   codex    ~/.codex/config.toml            [mcp_servers.laya]
-#   opencode ~/.config/opencode/opencode.json  mcp.laya
-#   crush    $STATE/agents/crush/crush.json    mcp.laya (plugin rewrites it on open — see below)
-#   grok     GROK_HOME=$STATE/agents/grok  grok mcp add
-#   copilot  ~/.copilot/mcp-config.json      mcpServers.laya
-#   hermes   hermes mcp add laya --command
-#   pi/omp   extensions/laya.js copied into the agent dir (native tools, no MCP)
+# laya-mcp-install — register the laya MCP proxy (and pi extension/hooks where
+# those apply) with every agent. Idempotent; pass agent names to restrict.
 set -euo pipefail
 cd "$(dirname "$0")"; HERE=$PWD
 
@@ -42,22 +29,27 @@ EOF
 
 install_claude() {
   command -v claude >/dev/null || { skip "claude: not installed"; return; }
-  claude mcp list 2>/dev/null | grep -q '^laya' || \
-    { claude mcp add --scope user laya -- "$PY" "$SRV" >/dev/null; }
-  # hard enforcement: doc-read gate + danger gate + injection screen + route advisory
+  # `claude mcp list` health-checks every server (~40s); check the config file instead
+  jq -e '.mcpServers.laya' "$HOME/.claude.json" >/dev/null 2>&1 || \
+    claude mcp add --scope user laya -- "$PY" "$SRV" >/dev/null
   local f=$HOME/.claude/settings.json
   [[ -f $f ]] || echo '{}' >"$f"
-  jq --arg g "$PY $HERE/laya-gate.py" '.hooks = (.hooks // {}) + {
-    PreToolUse: [
-      {matcher: "Read", hooks: [{type: "command", command: ($g + " pretool")}]},
-      {matcher: "Bash", hooks: [{type: "command", command: ($g + " pretool")}]},
-      {matcher: "mcp__laya__.*", hooks: [{type: "command", command: ($g + " pretool")}]}
-    ],
-    PostToolUse: [
-      {matcher: "Read", hooks: [{type: "command", command: ($g + " posttool")}]}
-    ],
-    UserPromptSubmit: [{hooks: [{type: "command", command: ($g + " prompt")}]}]
-  }' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  # merge per event: append a laya-gate hook only if the event's array lacks one
+  jq --arg g "$PY $HERE/laya-gate.py" '
+    def ensure($ev; $matcher; $mode):
+      .hooks[$ev] = (.hooks[$ev] // []) +
+        (if (.hooks[$ev] // []) | map(($matcher == "" or .matcher == $matcher) and
+            ([.hooks[].command] | any(contains("laya-gate")))) | any
+         then []
+         else [({hooks: [{type: "command", command: ($g + " " + $mode)}]}
+                + (if $matcher == "" then {} else {matcher: $matcher} end))]
+         end);
+    .hooks = (.hooks // {})
+    | ensure("PreToolUse"; "Read"; "pretool")
+    | ensure("PreToolUse"; "Bash"; "pretool")
+    | ensure("PreToolUse"; "mcp__laya__.*"; "pretool")
+    | ensure("PostToolUse"; "Read"; "posttool")
+    | ensure("UserPromptSubmit"; ""; "prompt")' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
   ok "claude: MCP + hooks in $f"
 }
 

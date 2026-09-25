@@ -1,20 +1,13 @@
 #!/usr/bin/env python3
-"""laya-gate — Claude-style hook engine enforcing laya use, for agents whose
-hook systems send JSON on stdin / expect JSON on stdout.
+"""laya-gate — hook engine enforcing laya use for JSON-stdin/stdout hook APIs.
 
-One script, three events:
+  laya-gate.py pretool  [claude|hermes]  # gate doc reads + dangerous bash
+  laya-gate.py posttool [claude|hermes]  # injection screen on doc reads
+  laya-gate.py prompt   [claude|hermes]  # route advisory on each user prompt
 
-  laya-gate.py pretool    # PreToolUse: gate doc reads + dangerous bash
-  laya-gate.py posttool   # PostToolUse: injection screen + mark docs scored
-  laya-gate.py prompt     # UserPromptSubmit: route advisory
-
-Input (stdin): claude-code hook JSON — {"tool_name", "tool_input",
-"tool_response"?, "prompt"?, "session_id", "cwd", ...}
-
-State lives per-session in $XDG_STATE_HOME/laya-gate/<session_id>.json because
-each hook invocation is a fresh process. Gate scope: files under
-$LAYA_GATE_DOCS (default "docs") inside cwd — same convention as pi's
-extension. Set LAYA_GATE_DOCS="" to gate every text-file read.
+Hooks are one-shot processes, so per-session state lives in
+$XDG_STATE_HOME/laya-gate/<session_id>.json. Gate scope: doc-extension files
+under $LAYA_GATE_DOCS (default "docs") inside cwd; "" gates every read.
 """
 
 import json
@@ -152,12 +145,11 @@ def pretool(ev):
         out({})
         return
 
-    if name in ("Read", "Grep", "Glob"):
-        target = inp.get("file_path") or inp.get("path") or inp.get("pattern") or ""
-        if name == "Read" and is_doc_path(target, ev.get("cwd", ".")):
-            if not st.get("docs_scored"):
-                deny("Laya decides which docs to read first. Call mcp__laya__laya_filter "
-                     "(or laya_triage) over docs/*, then read only the files it keeps.")
+    if name == "Read":
+        target = inp.get("file_path") or inp.get("path") or ""
+        if is_doc_path(target, ev.get("cwd", ".")) and not st.get("docs_scored"):
+            deny("Laya decides which docs to read first. Call mcp__laya__laya_filter "
+                 "(or laya_triage) over docs/*, then read only the files it keeps.")
             return
 
     if name == "Bash":
@@ -184,10 +176,7 @@ def pretool(ev):
     out({})  # allow
 
 def posttool(ev):
-    name = tool_name(ev)
-    st = load_state(ev)
-
-    if name == "Read":
+    if tool_name(ev) == "Read":
         ti = ev.get("tool_input") or {}
         target = ti.get("file_path") or ti.get("path") or ""
         if not is_doc_path(target, ev.get("cwd", ".")):
@@ -215,20 +204,23 @@ def prompt(ev):
         out({})
 
 if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        sys.exit(__doc__)
     if len(sys.argv) > 2:
         AGENT = sys.argv[2]
     try:
         event = json.loads(sys.stdin.read() or "{}")
     except Exception:
         event = {}
-    debug = os.environ.get("LAYA_GATE_DEBUG")
-    if debug:
+    handler = {"pretool": pretool, "posttool": posttool, "prompt": prompt}[sys.argv[1]]
+    if os.environ.get("LAYA_GATE_DEBUG"):
         STATE_DIR.mkdir(parents=True, exist_ok=True)
-        import io, contextlib
+        import contextlib
+        import io
         buf = io.StringIO()
         try:
             with contextlib.redirect_stdout(buf):
-                {"pretool": pretool, "posttool": posttool, "prompt": prompt}[sys.argv[1]](event)
+                handler(event)
         except Exception as e:
             buf.write(json.dumps({"gate_error": str(e)}))
         with open(STATE_DIR.parent / "gate-debug.log", "a") as fh:
@@ -237,4 +229,4 @@ if __name__ == "__main__":
                                  "cwd": event.get("cwd"), "out": buf.getvalue()[:300]}) + "\n")
         print(buf.getvalue(), end="")
     else:
-        {"pretool": pretool, "posttool": posttool, "prompt": prompt}[sys.argv[1]](event)
+        handler(event)

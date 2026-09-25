@@ -57,9 +57,8 @@ def _slim(result):
 
 
 def _post(path, body):
-    urls = URLS
     last = None
-    for base in urls:
+    for base in URLS:
         try:
             req = urllib.request.Request(
                 base + path, data=json.dumps(body).encode(),
