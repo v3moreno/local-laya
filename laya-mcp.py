@@ -74,13 +74,34 @@ def _post(path, body):
 
 def _read(path):
     with open(path, encoding="utf-8", errors="replace") as fh:
-        return fh.read()[:4000]
+        return f"file: {os.path.basename(path)}\n\n" + fh.read()[:4000]
+
+
+def _expand(files):
+    """Expand globs and ~ in the files list; keep order, drop dupes.
+    Empty/None defaults to docs/* — models fumble glob arrays often."""
+    import glob as _g
+    if not files:
+        files = ["docs/*"]
+    out, seen = [], set()
+    for f in files or []:
+        hits = sorted(_g.glob(os.path.expanduser(str(f)))) if _g.has_magic(str(f)) else [os.path.expanduser(str(f))]
+        for h in hits or [os.path.expanduser(str(f))]:
+            if h not in seen:
+                seen.add(h)
+                out.append(h)
+    return out
 
 
 server = MCPServer("laya", instructions=(
     "Laya is a local decision daemon: classification, filtering, ranking and "
-    "yes/no scoring in ~20ms with zero generated tokens. Prefer these tools "
-    "over reasoning about such decisions yourself."))
+    "yes/no scoring in ~20ms with zero generated tokens. RULES: (1) Before "
+    "reading any files under docs/ or deciding which documents to open, call "
+    "laya_filter or laya_triage — never classify documents yourself. "
+    "(2) For yes/no or classification questions about text, call laya_yesno "
+    "instead of reasoning yourself. (3) For choosing among options, call "
+    "laya_pick. These tools are faster and more reliable than doing the "
+    "decision in your head."))
 
 
 @server.tool(name="laya_status", description="Check the laya daemon is reachable: device, loaded checkpoints.")
@@ -106,7 +127,7 @@ def laya_route(text: str) -> str:
     "Pass file paths, not contents — the server reads them. Only open files listed under 'read'."))
 def laya_filter(question: str, files: list) -> str:
     items = []
-    for f in files or []:
+    for f in _expand(files):
         try:
             items.append({"file": f, "state": _read(f)})
         except OSError as e:
@@ -121,7 +142,7 @@ def laya_filter(question: str, files: list) -> str:
                      for it in good]})
     scores = {it["file"]: _slim(r).get("relevant") for it, r in zip(good, res["results"])}
     ranked = sorted(
-        ([{"file": it["file"], "relevant": scores[it["file"]]} if it["file"] in scores else it] for it in items),
+        ({"file": it["file"], "relevant": scores[it["file"]]} if it["file"] in scores else it for it in items),
         key=lambda x: -(x.get("relevant") or 0))
     return json.dumps({"ranked": ranked,
                        "read": [x["file"] for x in ranked if (x.get("relevant") or 0) >= 0.5]})
@@ -132,7 +153,7 @@ def laya_filter(question: str, files: list) -> str:
     "needs_reply, is_spam. Pass file paths. Never classify documents yourself."))
 def laya_triage(files: list) -> str:
     items = []
-    for f in files or []:
+    for f in _expand(files):
         try:
             items.append({"file": f, "state": _read(f)})
         except OSError as e:

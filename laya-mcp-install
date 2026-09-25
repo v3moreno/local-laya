@@ -42,19 +42,37 @@ EOF
 
 install_claude() {
   command -v claude >/dev/null || { skip "claude: not installed"; return; }
-  claude mcp list 2>/dev/null | grep -q '^laya' && { skip "claude: already configured"; return; }
-  claude mcp add --scope user laya -- "$PY" "$SRV" >/dev/null && ok "claude: user scope"
+  claude mcp list 2>/dev/null | grep -q '^laya' || \
+    { claude mcp add --scope user laya -- "$PY" "$SRV" >/dev/null; }
+  # hard enforcement: doc-read gate + danger gate + injection screen + route advisory
+  local f=$HOME/.claude/settings.json
+  [[ -f $f ]] || echo '{}' >"$f"
+  jq --arg g "$PY $HERE/laya-gate.py" '.hooks = (.hooks // {}) + {
+    PreToolUse: [
+      {matcher: "Read", hooks: [{type: "command", command: ($g + " pretool")}]},
+      {matcher: "Bash", hooks: [{type: "command", command: ($g + " pretool")}]},
+      {matcher: "mcp__laya__.*", hooks: [{type: "command", command: ($g + " pretool")}]}
+    ],
+    PostToolUse: [
+      {matcher: "Read", hooks: [{type: "command", command: ($g + " posttool")}]}
+    ],
+    UserPromptSubmit: [{hooks: [{type: "command", command: ($g + " prompt")}]}]
+  }' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  ok "claude: MCP + hooks in $f"
 }
 
 install_opencode() {
   local d=$HOME/.config/opencode
   local f=$d/opencode.json
-  mkdir -p "$d"
+  mkdir -p "$d/plugins"
   [[ -f $f ]] || echo '{}' >"$f"
-  if jq -e '.mcp.laya' "$f" >/dev/null 2>&1; then skip "opencode: already configured"; return; fi
-  jq --arg c "$PY" --arg a "$SRV" '.mcp.laya={type:"local",command:[$c,$a],enabled:true}' \
-    "$f" >"$f.tmp" && mv "$f.tmp" "$f"
-  ok "opencode: $f"
+  jq -e '.mcp.laya' "$f" >/dev/null 2>&1 || {
+    jq --arg c "$PY" --arg a "$SRV" '.mcp.laya={type:"local",command:[$c,$a],enabled:true}' \
+      "$f" >"$f.tmp" && mv "$f.tmp" "$f"; }
+  # hard enforcement plugin (tool.execute.before/after -> laya-gate.py)
+  local plug=$HERE/../ask-laya/opencode-plugin/laya.js
+  [[ -f $plug ]] && cp -f "$plug" "$d/plugins/laya.js"
+  ok "opencode: $f + plugins/laya.js"
 }
 
 install_crush() {
@@ -87,8 +105,36 @@ install_copilot() {
 
 install_hermes() {
   command -v hermes >/dev/null || { skip "hermes: not installed"; return; }
-  hermes mcp list 2>/dev/null | grep -qi laya && { skip "hermes: already configured"; return; }
-  yes | hermes mcp add laya --command "$PY" --args "$SRV" >/dev/null 2>&1 && ok "hermes"
+  hermes mcp list 2>/dev/null | grep -qi laya || \
+    yes | hermes mcp add laya --command "$PY" --args "$SRV" >/dev/null 2>&1
+  # hard enforcement via shell hooks (config.yaml)
+  python3 - "$PY" "$HERE/laya-gate.py" "$HOME/.hermes/config.yaml" <<'PYEOF' 2>/dev/null || true
+import sys, yaml
+py, gate, f = sys.argv[1], sys.argv[2], sys.argv[3]
+try:
+    cfg = yaml.safe_load(open(f)) or {}
+except OSError:
+    cfg = {}
+hooks = cfg.setdefault("hooks", {})
+def has(event, cmd):
+    return any(cmd in (h.get("command") or "") for h in hooks.get(event, []))
+G = f"{py} {gate}"
+hooks.setdefault("pre_tool_call", [])
+if not has("pre_tool_call", G):
+    hooks["pre_tool_call"] += [
+        {"matcher": "read_file|terminal", "command": f"{G} pretool hermes", "timeout": 20},
+        {"matcher": "laya", "command": f"{G} pretool hermes", "timeout": 10}]
+hooks.setdefault("post_tool_call", [])
+if not has("post_tool_call", G):
+    hooks["post_tool_call"].append(
+        {"matcher": "read_file", "command": f"{G} posttool hermes", "timeout": 20})
+hooks.setdefault("pre_llm_call", [])
+if not has("pre_llm_call", G):
+    hooks["pre_llm_call"].append({"command": f"{G} prompt hermes", "timeout": 15})
+cfg["hooks_auto_accept"] = True
+open(f, "w").write(yaml.dump(cfg, sort_keys=False))
+PYEOF
+  ok "hermes: MCP + hooks in ~/.hermes/config.yaml"
 }
 
 install_omp() { install_pi "$1"; }
