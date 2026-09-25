@@ -49,7 +49,9 @@ Unlike `laya[mcp]`'s bundled server, this proxies to the warm daemon instead of 
 shape), decision JSON on stdout. Third arg selects the dialect: `laya-gate.py pretool hermes` emits
 `{"decision":"block",...}` instead of `hookSpecificOutput`. Gate scope defaults to `docs/` under cwd
 (`LAYA_GATE_DOCS`); state is per-session under `$XDG_STATE_HOME/laya-gate/`. Debug with
-`LAYA_GATE_DEBUG=1` → `$XDG_STATE_HOME/gate-debug.log`.
+`LAYA_GATE_DEBUG=1` → `$XDG_STATE_HOME/gate-debug.log`. Decision calls from
+[ask-jev](https://github.com/v3moreno/ask-jev) (`jev_*` MCP tools, `ask-jev` CLI) open the doc gate
+the same as laya calls.
 
 Run `./laya-mcp-install` once; for crush/grok the omarchy-local-ai fork writes the block on every `open`.
 Set `LAYA_MCP=off` to disable the plugin-side injection.
