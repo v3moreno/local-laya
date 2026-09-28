@@ -10,7 +10,8 @@ Local [laya](https://pypi.org/project/laya/) decision daemon + agent tooling for
 | `laya-serve` | Daemon launcher: `./laya-serve cpu` → :8123, `./laya-serve gpu` → :8124 (lazy-loads checkpoints, honors `laya.env`) |
 | `serve.py` | HTTP server — everything stock `laya.serve` serves, plus `POST /v1/systemone/batch` |
 | `laya-mcp.py` | stdio **MCP server proxying to the daemon** — agents get laya tools without loading checkpoints |
-| `laya-gate.py` | **hook engine** — doc-read gate, destructive-command gate, injection screen, route advisory. Speaks claude + hermes hook protocols |
+| `laya-gate.py` | **hook engine** — doc-read gate, destructive-command gate, injection screen, route advisory. Speaks claude + hermes hook protocols (opencode via its plugin) |
+| `shared.json` | Questions, thresholds and gate regexes — read by `laya-gate.py`, `laya-mcp.py`, ask-laya's pi extension and `ask` CLI, so every agent asks laya the same thing |
 | `laya-mcp-install` | Registers MCP server, hooks and plugins with every installed agent. Idempotent; `./laya-mcp-install [agent...]` |
 | `systemd/` | `laya-cpu.service`, `laya-gpu.service` user units |
 
@@ -46,9 +47,11 @@ Unlike `laya[mcp]`'s bundled server, this proxies to the warm daemon instead of 
 | codex, crush, grok, copilot | MCP only | soft — tools + server `instructions`; no hook surface for read-gating |
 
 `laya-gate.py` wire protocol: JSON event on stdin (claude's `tool_name`/`tool_input`/`session_id`/`cwd`
-shape), decision JSON on stdout. Third arg selects the dialect: `laya-gate.py pretool hermes` emits
-`{"decision":"block",...}` instead of `hookSpecificOutput`. Gate scope defaults to `docs/` under cwd
-(`LAYA_GATE_DOCS`); state is per-session under `$XDG_STATE_HOME/laya-gate/`. Debug with
+shape; hermes' `extra.result`/`extra.user_message` also read), decision JSON on stdout. Third arg
+selects the dialect (`claude`|`hermes`|`opencode`): hermes emits `{"decision":"block",...}` instead
+of `hookSpecificOutput`, and block/advisory text names each agent's own filter tool. Gate scope
+defaults to `docs/` under cwd (`LAYA_GATE_DOCS`); state (last prompt + docs a filter kept for it)
+is per-session under `$XDG_STATE_HOME/laya-gate/`, pruned after 7 days. Debug with
 `LAYA_GATE_DEBUG=1` → `$XDG_STATE_HOME/gate-debug.log`. Decision calls from
 [ask-jev](https://github.com/v3moreno/ask-jev) (`jev_*` MCP tools, `ask-jev` CLI) open the doc gate
 the same as laya calls.
