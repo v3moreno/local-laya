@@ -44,7 +44,9 @@ Unlike `laya[mcp]`'s bundled server, this proxies to the warm daemon instead of 
 | hermes | MCP + `config.yaml` hooks | **hard** — `read_file`/`terminal` gated (`pre_tool_call`), `pre_llm_call` advisory |
 | opencode | MCP + `plugins/laya.js` | **hard** — `tool.execute.before` delegates to `laya-gate.py` |
 | pi, omp | native extension | **hard** — `tool_call` blocking + injection guard + danger gate |
-| codex, crush, grok, copilot | MCP only | soft — tools + server `instructions`; no hook surface for read-gating |
+| gemini | MCP + `~/.gemini/settings.json` hooks | **hard** — BeforeTool/AfterTool/BeforeAgent via `laya-gate.py … gemini` |
+| cursor-agent, Cursor IDE | MCP + `~/.cursor/hooks.json` | **hard** — beforeReadFile/beforeShellExecution/postToolUse via `laya-gate.py … cursor` |
+| codex, crush, grok, copilot, windsurf, zed, vscode | MCP only | soft — tools + server `instructions`; no hook surface for read-gating |
 
 `laya-gate.py` wire protocol: JSON event on stdin (claude's `tool_name`/`tool_input`/`session_id`/`cwd`
 shape; hermes' `extra.result`/`extra.user_message` also read), decision JSON on stdout. Third arg
