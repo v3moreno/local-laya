@@ -27,8 +27,15 @@ esac
 
 export LAYA_HOST="${LAYA_HOST:-127.0.0.1}"
 
-set -a
-[ -f laya.env ] && . ./laya.env
-set +a
+# laya.env is data, not shell: read NAME=value lines by hand so a stray
+# $(...) or newline is inert instead of executed, and export only LAYA_*
+# names so it can never set PATH, LD_PRELOAD, PYTHONPATH or the like.
+if [ -f laya.env ]; then
+  while IFS='=' read -r k v || [[ -n $k ]]; do
+    k=${k#"${k%%[![:space:]]*}"}  # ltrim
+    k=${k%"${k##*[![:space:]]}"}  # rtrim
+    [[ $k =~ ^LAYA_[A-Z0-9_]+$ ]] && export "$k=$v"
+  done < laya.env
+fi
 
 exec .venv/bin/python -m serve
