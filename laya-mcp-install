@@ -181,6 +181,8 @@ install_pi() {
   [[ -f $PI_EXT ]] || { skip "$a: $PI_EXT missing"; return; }
   mkdir -p "$d" || { bad "$a: cannot create $d"; return 1; }
   cp -f "$PI_EXT" "$d/laya.js" || { bad "$a: extension copy failed"; return 1; }
+  # the extension reads its questions from here (pi loads only .js/.ts)
+  cp -f "$HERE/shared.json" "$d/laya-shared.json" || { bad "$a: shared.json copy failed"; return 1; }
   ok "$a: $d/laya.js (native extension — $a has no MCP)"
 }
 
